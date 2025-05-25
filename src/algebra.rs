@@ -1,4 +1,4 @@
-use std::ops::{Add, AddAssign, Index, IndexMut, Mul, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 /// An n-dimensional matrix.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -266,6 +266,33 @@ where
     }
 }
 
+impl<T, const R: usize> Mul<T> for Tensor<T, R>
+where
+    T: Mul + Clone,
+{
+    type Output = Tensor<T::Output, R>;
+
+    fn mul(self, rhs: T) -> Self::Output {
+        let result_data = self.data.into_iter().map(|el| el * rhs.clone()).collect();
+
+        Tensor {
+            data: result_data,
+            shape: self.shape,
+            steps: self.steps,
+        }
+    }
+}
+impl<T, const R: usize> MulAssign<T> for Tensor<T, R>
+where
+    T: MulAssign + Clone,
+{
+    fn mul_assign(&mut self, rhs: T) {
+        for el in &mut self.data {
+            *el *= rhs.clone();
+        }
+    }
+}
+
 impl<T, const R: usize> Mul for Tensor<T, R>
 where
     T: Mul,
@@ -504,6 +531,36 @@ mod tests {
         assert_eq!(tensor_a[[1, 0]], -5);
         assert_eq!(tensor_a[[1, 1]], 57);
         assert_eq!(tensor_a[[1, 2]], 60);
+    }
+
+    #[test]
+    fn test_tensor_scalar_mul() {
+        let mut tensor_a = Tensor::<i32, 2>::new([2, 3]);
+        tensor_a[[0, 0]] = 7;
+        tensor_a[[0, 2]] = 31;
+        tensor_a[[1, 0]] = 0;
+        tensor_a[[1, 2]] = 102;
+
+        let tensor_b = tensor_a * 3;
+        assert_eq!(tensor_b[[0, 0]], 21);
+        assert_eq!(tensor_b[[0, 2]], 93);
+        assert_eq!(tensor_b[[1, 0]], 0);
+        assert_eq!(tensor_b[[1, 2]], 306);
+    }
+
+    #[test]
+    fn test_tensor_scalar_mul_assign() {
+        let mut tensor = Tensor::<i32, 2>::new([2, 3]);
+        tensor[[0, 0]] = 7;
+        tensor[[0, 2]] = 31;
+        tensor[[1, 0]] = 0;
+        tensor[[1, 2]] = 102;
+
+        tensor *= 3;
+        assert_eq!(tensor[[0, 0]], 21);
+        assert_eq!(tensor[[0, 2]], 93);
+        assert_eq!(tensor[[1, 0]], 0);
+        assert_eq!(tensor[[1, 2]], 306);
     }
 
     #[test]
