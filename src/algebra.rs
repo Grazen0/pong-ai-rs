@@ -207,20 +207,25 @@ impl<T, const R: usize> IndexMut<[usize; R]> for Tensor<T, R> {
 
 impl<T, const R: usize> Add for Tensor<T, R>
 where
-    T: Add<Output = T>,
+    T: Add,
 {
-    type Output = Self;
+    type Output = Tensor<T::Output, R>;
 
-    fn add(mut self, rhs: Self) -> Self::Output {
+    fn add(self, rhs: Self) -> Self::Output {
         assert_eq!(self.shape, rhs.shape, "tensor dimensions do not match");
 
-        self.data = self
+        let result_data = self
             .data
             .into_iter()
             .zip(rhs.data)
             .map(|(a, b)| a + b)
             .collect();
-        self
+
+        Tensor {
+            data: result_data,
+            shape: self.shape,
+            steps: self.steps,
+        }
     }
 }
 
@@ -239,38 +244,48 @@ where
 
 impl<T, const R: usize> Sub for Tensor<T, R>
 where
-    T: Sub<Output = T>,
+    T: Sub,
 {
-    type Output = Self;
+    type Output = Tensor<T::Output, R>;
 
-    fn sub(mut self, rhs: Self) -> Self::Output {
+    fn sub(self, rhs: Self) -> Self::Output {
         assert_eq!(self.shape, rhs.shape, "tensor dimensions do not match");
 
-        self.data = self
+        let result_data = self
             .data
             .into_iter()
             .zip(rhs.data)
             .map(|(a, b)| a - b)
             .collect();
-        self
+
+        Tensor {
+            data: result_data,
+            shape: self.shape,
+            steps: self.steps,
+        }
     }
 }
 
 impl<T, const R: usize> Mul for Tensor<T, R>
 where
-    T: Mul<Output = T>,
+    T: Mul,
 {
-    type Output = Self;
+    type Output = Tensor<T::Output, R>;
 
-    fn mul(mut self, rhs: Self) -> Self::Output {
+    fn mul(self, rhs: Self) -> Self::Output {
         if self.shape == rhs.shape {
-            self.data = self
+            let result_data = self
                 .data
                 .into_iter()
                 .zip(rhs.data)
                 .map(|(a, b)| a * b)
                 .collect();
-            return self;
+
+            return Tensor {
+                data: result_data,
+                shape: self.shape,
+                steps: self.steps,
+            };
         }
 
         todo!("implement multiplication for tensors of different shapes");
