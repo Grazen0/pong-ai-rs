@@ -1,4 +1,8 @@
-use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
+use std::{
+    ops::{Add, Div, Index, IndexMut, Mul, Neg, Sub},
+    slice::{Iter, IterMut},
+    vec::IntoIter,
+};
 
 /// An n-dimensional matrix.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,18 +16,6 @@ impl<T, const R: usize> Tensor<T, R>
 where
     T: Default + Clone,
 {
-    /// Constructs a new `Tensor<T, R>` with the given shape and filled with `T::default()`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use pong_ai::algebra::Tensor;
-    /// let tensor = Tensor::<i32, 2>::new([2, 2]);
-    /// assert_eq!(tensor[[0, 0]], 0);
-    /// assert_eq!(tensor[[0, 1]], 0);
-    /// assert_eq!(tensor[[1, 0]], 0);
-    /// assert_eq!(tensor[[1, 1]], 0);
-    /// ```
     pub fn new(shape: [usize; R]) -> Self {
         let data_len = shape.iter().product();
         Self {
@@ -32,27 +24,32 @@ where
             steps: Self::calculate_steps(&shape),
         }
     }
+
+    pub fn reshape(&mut self, new_shape: [usize; R]) {
+        self.shape = new_shape;
+        self.steps = Self::calculate_steps(&new_shape);
+        self.data.resize(new_shape.iter().product(), T::default());
+    }
 }
 
 impl<T, const R: usize> Tensor<T, R>
 where
     T: Clone,
 {
-    /// Fills `self` with elements by cloning `value`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use pong_ai::algebra::Tensor;
-    /// let mut tensor = Tensor::<i32, 2>::new([2, 2]);
-    /// tensor.fill(1);
-    /// assert_eq!(tensor[[0, 0]], 1);
-    /// assert_eq!(tensor[[0, 1]], 1);
-    /// assert_eq!(tensor[[1, 0]], 1);
-    /// assert_eq!(tensor[[1, 1]], 1);
-    /// ```
     pub fn fill(&mut self, value: T) {
         self.data.fill(value);
+    }
+
+    fn broadcast<F>(mut self, rhs: Self, f: F) -> Self
+    where
+        F: Fn((T, T)) -> T,
+    {
+        if self.shape == rhs.shape {
+            self.data = self.data.into_iter().zip(rhs.data).map(f).collect();
+            return self;
+        }
+
+        todo!()
     }
 }
 
@@ -69,86 +66,20 @@ impl<T, const R: usize> Tensor<T, R> {
         steps
     }
 
-    /// Returns a reference to this tensor's shape.
     pub const fn shape(&self) -> &[usize; R] {
         &self.shape
     }
 
-    /// Changes this tensor's `shape`, effectively reinterpreting its data with a new shape.
-    /// Note that the product of `new_shape` must be equal to the product of the current `shape`.
-    ///
-    /// # Panics
-    ///
-    /// This method will panic if the given argument results in a different total data size.
-    /// (This is: if the current and new shapes have different products).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use pong_ai::algebra::Tensor;
-    /// let mut tensor = Tensor::<i32, 2>::new([2, 3]);
-    /// tensor[[0, 0]] = 1;
-    /// tensor[[0, 1]] = 2;
-    /// tensor[[1, 0]] = 4;
-    /// tensor[[1, 2]] = 6;
-    ///
-    /// tensor.reshape([3, 2]);
-    /// assert_eq!(tensor[[0, 0]], 1);
-    /// assert_eq!(tensor[[0, 1]], 2);
-    /// assert_eq!(tensor[[1, 1]], 4);
-    /// assert_eq!(tensor[[2, 1]], 6);
-    /// ```
-    pub fn reshape(&mut self, new_shape: [usize; R]) {
-        assert_eq!(
-            self.data.len(),
-            new_shape.iter().product(),
-            "invalid tensor reshape"
-        );
-        self.shape = new_shape;
-        self.steps = Self::calculate_steps(&new_shape);
-    }
-
-    /// Changes this tensor's `shape`, effectively reinterpreting its data with a new shape.
-    ///
-    /// For a safe alternative see `reshape`.
-    ///
-    /// # Safety
-    ///
-    /// Calling this method with a `new_shape` argument that results in a different
-    /// total data size may cause invalid indexing later on.
-    pub unsafe fn reshape_unchecked(&mut self, new_shape: [usize; R]) {
-        self.shape = new_shape;
-        self.steps = Self::calculate_steps(&new_shape);
-    }
-
-    /// Returns a reference to an element of this tensor at `index` or `None` if `index` is
-    /// out of bounds.
-    ///
-    /// See `get_mut` for a version that returns a mutable reference instead.
     pub fn get(&self, index: [usize; R]) -> Option<&T> {
         let physical_index: usize = index.iter().zip(self.steps).map(|(i, s)| i * s).sum();
         self.data.get(physical_index)
     }
 
-    /// Returns a mutable reference to an element of this tensor at `index` or `None` if
-    /// `index` is out of bounds.
-    ///
-    /// See `get` for a version that returns an inmutable reference instead.
     pub fn get_mut(&mut self, index: [usize; R]) -> Option<&mut T> {
         let physical_index: usize = index.iter().zip(self.steps).map(|(i, s)| i * s).sum();
         self.data.get_mut(physical_index)
     }
 
-    /// Returns a reference to an element of this tensor at `index` without doing bounds checking.
-    ///
-    /// For a safe alternative see `get`.
-    ///
-    /// # Safety
-    ///
-    /// Calling this method with an out-of-bounds index is *[undefined behavior]*
-    /// even if the resulting reference is not used.
-    ///
-    /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     pub unsafe fn get_unchecked(&self, index: [usize; R]) -> &T {
         unsafe {
             let physical_index: usize = index.iter().zip(self.steps).map(|(i, s)| i * s).sum();
@@ -156,22 +87,19 @@ impl<T, const R: usize> Tensor<T, R> {
         }
     }
 
-    /// Returns a mutable reference to an element of this tensor at `index` without doing
-    /// bounds checking.
-    ///
-    /// For a safe alternative see `get_mut`.
-    ///
-    /// # Safety
-    ///
-    /// Calling this method with an out-of-bounds index is *[undefined behavior]*
-    /// even if the resulting reference is not used.
-    ///
-    /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     pub unsafe fn get_unchecked_mut(&mut self, index: [usize; R]) -> &mut T {
         unsafe {
             let physical_index: usize = index.iter().zip(self.steps).map(|(i, s)| i * s).sum();
             self.data.get_unchecked_mut(physical_index)
         }
+    }
+
+    pub fn iter(&self) -> Iter<T> {
+        self.data.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> IterMut<T> {
+        self.data.iter_mut()
     }
 }
 
@@ -207,165 +135,115 @@ impl<T, const R: usize> IndexMut<[usize; R]> for Tensor<T, R> {
 
 impl<T, const R: usize> Add for Tensor<T, R>
 where
-    T: Add,
+    T: Add<Output = T> + Clone,
 {
-    type Output = Tensor<T::Output, R>;
+    type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        assert_eq!(self.shape, rhs.shape, "tensor dimensions do not match");
-
-        let result_data = self
-            .data
-            .into_iter()
-            .zip(rhs.data)
-            .map(|(a, b)| a + b)
-            .collect();
-
-        Tensor {
-            data: result_data,
-            shape: self.shape,
-            steps: self.steps,
-        }
+        self.broadcast(rhs, |(a, b)| a + b)
     }
 }
 
-impl<T, const R: usize> AddAssign for Tensor<T, R>
+impl<T, const R: usize> Add<T> for Tensor<T, R>
 where
-    T: AddAssign,
+    T: Add<Output = T> + Clone,
 {
-    fn add_assign(&mut self, rhs: Self) {
-        assert_eq!(self.shape, rhs.shape, "tensor dimensions do not match");
+    type Output = Self;
 
-        for (i, el) in rhs.data.into_iter().enumerate() {
-            self.data[i] += el;
-        }
+    fn add(mut self, rhs: T) -> Self::Output {
+        self.data = self.data.into_iter().map(|x| x + rhs.clone()).collect();
+        self
+    }
+}
+
+impl<T, const R: usize> Neg for Tensor<T, R>
+where
+    T: Neg<Output = T>,
+{
+    type Output = Self;
+
+    fn neg(mut self) -> Self::Output {
+        self.data = self.data.into_iter().map(T::neg).collect();
+        self
     }
 }
 
 impl<T, const R: usize> Sub for Tensor<T, R>
 where
-    T: Sub,
+    T: Sub<Output = T> + Clone,
 {
-    type Output = Tensor<T::Output, R>;
+    type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        assert_eq!(self.shape, rhs.shape, "tensor dimensions do not match");
-
-        let result_data = self
-            .data
-            .into_iter()
-            .zip(rhs.data)
-            .map(|(a, b)| a - b)
-            .collect();
-
-        Tensor {
-            data: result_data,
-            shape: self.shape,
-            steps: self.steps,
-        }
+        self.broadcast(rhs, |(a, b)| a - b)
     }
 }
 
-impl<T, const R: usize> Mul<T> for Tensor<T, R>
+impl<T, const R: usize> Sub<T> for Tensor<T, R>
 where
-    T: Mul + Clone,
+    T: Sub<Output = T> + Clone,
 {
-    type Output = Tensor<T::Output, R>;
+    type Output = Self;
 
-    fn mul(self, rhs: T) -> Self::Output {
-        let result_data = self.data.into_iter().map(|el| el * rhs.clone()).collect();
-
-        Tensor {
-            data: result_data,
-            shape: self.shape,
-            steps: self.steps,
-        }
-    }
-}
-impl<T, const R: usize> MulAssign<T> for Tensor<T, R>
-where
-    T: MulAssign + Clone,
-{
-    fn mul_assign(&mut self, rhs: T) {
-        for el in &mut self.data {
-            *el *= rhs.clone();
-        }
+    fn sub(mut self, rhs: T) -> Self::Output {
+        self.data = self.data.into_iter().map(|x| x - rhs.clone()).collect();
+        self
     }
 }
 
 impl<T, const R: usize> Mul for Tensor<T, R>
 where
-    T: Mul,
+    T: Mul<Output = T> + Clone,
 {
-    type Output = Tensor<T::Output, R>;
+    type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        if self.shape == rhs.shape {
-            let result_data = self
-                .data
-                .into_iter()
-                .zip(rhs.data)
-                .map(|(a, b)| a * b)
-                .collect();
-
-            return Tensor {
-                data: result_data,
-                shape: self.shape,
-                steps: self.steps,
-            };
-        }
-
-        todo!("implement multiplication for tensors of different shapes");
+        self.broadcast(rhs, |(a, b)| a * b)
     }
 }
 
-impl<T, const R: usize> SubAssign for Tensor<T, R>
+impl<T, const R: usize> Mul<T> for Tensor<T, R>
 where
-    T: SubAssign,
+    T: Mul<Output = T> + Clone,
 {
-    fn sub_assign(&mut self, rhs: Self) {
-        for (i, el) in rhs.data.into_iter().enumerate() {
-            self.data[i] -= el;
-        }
+    type Output = Self;
+
+    fn mul(mut self, rhs: T) -> Self::Output {
+        self.data = self.data.into_iter().map(|x| x * rhs.clone()).collect();
+        self
     }
 }
 
-impl<T> Tensor<T, 2>
+impl<T, const R: usize> Div for Tensor<T, R>
 where
-    T: Clone,
+    T: Div<Output = T> + Clone,
 {
-    /// Returns the transpose of this 2-dimensional tensor (as in a matrix transpose).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use pong_ai::algebra::Tensor;
-    /// let mut tensor = Tensor::<i32, 2>::new([2, 3]);
-    /// tensor[[0, 0]] = 1;
-    /// tensor[[0, 1]] = 2;
-    /// tensor[[1, 2]] = 3;
-    ///
-    /// let transpose = tensor.transpose_2d();
-    /// assert_eq!(transpose.shape(), &[3, 2]);
-    /// assert_eq!(transpose[[0, 0]], 1);
-    /// assert_eq!(transpose[[1, 0]], 2);
-    /// assert_eq!(transpose[[2, 1]], 3);
-    /// ```
-    pub fn transpose_2d(&self) -> Self {
-        let mut data = Vec::with_capacity(self.data.len());
+    type Output = Self;
 
-        for j in 0..self.shape[1] {
-            for i in 0..self.shape[0] {
-                data.push(self[[i, j]].clone());
-            }
-        }
+    fn div(self, rhs: Self) -> Self::Output {
+        self.broadcast(rhs, |(a, b)| a / b)
+    }
+}
 
-        let new_shape = [self.shape[1], self.shape[0]];
-        Self {
-            data,
-            shape: new_shape,
-            steps: Self::calculate_steps(&new_shape),
-        }
+impl<T, const R: usize> Div<T> for Tensor<T, R>
+where
+    T: Div<Output = T> + Clone,
+{
+    type Output = Self;
+
+    fn div(mut self, rhs: T) -> Self::Output {
+        self.data = self.data.into_iter().map(|x| x / rhs.clone()).collect();
+        self
+    }
+}
+
+impl<T, const R: usize> IntoIterator for Tensor<T, R> {
+    type Item = T;
+
+    type IntoIter = IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.into_iter()
     }
 }
 
@@ -378,12 +256,12 @@ mod tests {
         let mut tensor = Tensor::<i32, 2>::new([2, 3]);
         tensor.data = vec![1, 2, 3, 4, 5, 6];
 
-        assert_eq!(tensor.data[0], 1);
-        assert_eq!(tensor.data[1], 2);
-        assert_eq!(tensor.data[2], 3);
-        assert_eq!(tensor.data[3], 4);
-        assert_eq!(tensor.data[4], 5);
-        assert_eq!(tensor.data[5], 6);
+        assert_eq!(tensor[0], 1);
+        assert_eq!(tensor[1], 2);
+        assert_eq!(tensor[2], 3);
+        assert_eq!(tensor[3], 4);
+        assert_eq!(tensor[4], 5);
+        assert_eq!(tensor[5], 6);
     }
 
     #[test]
@@ -450,34 +328,6 @@ mod tests {
     }
 
     #[test]
-    fn test_tensor_add_assign() {
-        let mut tensor_a = Tensor::<i32, 2>::new([2, 3]);
-        tensor_a[[0, 0]] = 7;
-        tensor_a[[0, 1]] = 17;
-        tensor_a[[0, 2]] = 31;
-        tensor_a[[1, 0]] = 0;
-        tensor_a[[1, 1]] = 63;
-        tensor_a[[1, 2]] = 102;
-
-        let mut tensor_b = Tensor::<i32, 2>::new([2, 3]);
-        tensor_b[[0, 0]] = 3;
-        tensor_b[[0, 1]] = 5;
-        tensor_b[[0, 2]] = -2;
-        tensor_b[[1, 0]] = 5;
-        tensor_b[[1, 1]] = 6;
-        tensor_b[[1, 2]] = 42;
-
-        tensor_a += tensor_b;
-
-        assert_eq!(tensor_a[[0, 0]], 10);
-        assert_eq!(tensor_a[[0, 1]], 22);
-        assert_eq!(tensor_a[[0, 2]], 29);
-        assert_eq!(tensor_a[[1, 0]], 5);
-        assert_eq!(tensor_a[[1, 1]], 69);
-        assert_eq!(tensor_a[[1, 2]], 144);
-    }
-
-    #[test]
     fn test_tensor_sub() {
         let mut tensor_a = Tensor::<i32, 2>::new([2, 3]);
         tensor_a[[0, 0]] = 7;
@@ -506,34 +356,6 @@ mod tests {
     }
 
     #[test]
-    fn test_tensor_sub_assign() {
-        let mut tensor_a = Tensor::<i32, 2>::new([2, 3]);
-        tensor_a[[0, 0]] = 7;
-        tensor_a[[0, 1]] = 17;
-        tensor_a[[0, 2]] = 31;
-        tensor_a[[1, 0]] = 0;
-        tensor_a[[1, 1]] = 63;
-        tensor_a[[1, 2]] = 102;
-
-        let mut tensor_b = Tensor::<i32, 2>::new([2, 3]);
-        tensor_b[[0, 0]] = 3;
-        tensor_b[[0, 1]] = 5;
-        tensor_b[[0, 2]] = -2;
-        tensor_b[[1, 0]] = 5;
-        tensor_b[[1, 1]] = 6;
-        tensor_b[[1, 2]] = 42;
-
-        tensor_a -= tensor_b;
-
-        assert_eq!(tensor_a[[0, 0]], 4);
-        assert_eq!(tensor_a[[0, 1]], 12);
-        assert_eq!(tensor_a[[0, 2]], 33);
-        assert_eq!(tensor_a[[1, 0]], -5);
-        assert_eq!(tensor_a[[1, 1]], 57);
-        assert_eq!(tensor_a[[1, 2]], 60);
-    }
-
-    #[test]
     fn test_tensor_scalar_mul() {
         let mut tensor_a = Tensor::<i32, 2>::new([2, 3]);
         tensor_a[[0, 0]] = 7;
@@ -546,41 +368,5 @@ mod tests {
         assert_eq!(tensor_b[[0, 2]], 93);
         assert_eq!(tensor_b[[1, 0]], 0);
         assert_eq!(tensor_b[[1, 2]], 306);
-    }
-
-    #[test]
-    fn test_tensor_scalar_mul_assign() {
-        let mut tensor = Tensor::<i32, 2>::new([2, 3]);
-        tensor[[0, 0]] = 7;
-        tensor[[0, 2]] = 31;
-        tensor[[1, 0]] = 0;
-        tensor[[1, 2]] = 102;
-
-        tensor *= 3;
-        assert_eq!(tensor[[0, 0]], 21);
-        assert_eq!(tensor[[0, 2]], 93);
-        assert_eq!(tensor[[1, 0]], 0);
-        assert_eq!(tensor[[1, 2]], 306);
-    }
-
-    #[test]
-    fn test_tensor_transpose() {
-        let mut mat = Tensor::<i32, 2>::new([3, 2]);
-        mat[[0, 0]] = 1;
-        mat[[0, 1]] = 2;
-        mat[[1, 0]] = 3;
-        mat[[1, 1]] = 4;
-        mat[[2, 0]] = 5;
-        mat[[2, 1]] = 6;
-
-        let mat_t = mat.transpose_2d();
-
-        assert_eq!(mat_t.shape(), &[2, 3]);
-        assert_eq!(mat_t[[0, 0]], 1);
-        assert_eq!(mat_t[[0, 1]], 3);
-        assert_eq!(mat_t[[0, 2]], 5);
-        assert_eq!(mat_t[[1, 0]], 2);
-        assert_eq!(mat_t[[1, 1]], 4);
-        assert_eq!(mat_t[[1, 2]], 6);
     }
 }
